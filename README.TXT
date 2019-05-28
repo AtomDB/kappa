@@ -47,13 +47,14 @@ Usage
 Mostly just make a kappa object, then call it
 
 .. code-block:: python
-import kappa
-# make a quick, 2-elements kapp model
-a=kappa.kappamodel(elements=[6,8])
-ebins = numpy.linspace(0.01,5,1001)
-kp = 5.0
-T = 2e5
-spectrum = a.calc_spectrum(kp, T, ebins)
+
+  import kappa
+  # make a quick, 2-elements kapp model
+  a=kappa.kappamodel(elements=[6,8])
+  ebins = numpy.linspace(0.01,5,1001)
+  kp = 5.0
+  T = 2e5
+  spectrum = a.calc_spectrum(kp, T, ebins)
 
 
 -----
