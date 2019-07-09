@@ -113,6 +113,10 @@ Version History
 May 27th 2019
 Initial release
 
+0.2.0
+July 9th 2019
+Error in the ionization balance calculation fixed.
+
 
 
 .. _pyxspec: https://heasarc.gsfc.nasa.gov/xanadu/xspec/python/html/index.html

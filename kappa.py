@@ -173,13 +173,13 @@ class irdata():
         else:
           cirate = numpy.zeros(len(Tvec))
 
-        if self.ionrecdata[Z][z1]['DR'] != False:
-          drrate = self.calc_dr_rate(Z, z1, Tvec)
+        if self.ionrecdata[Z][z1+1]['DR'] != False:
+          drrate = self.calc_dr_rate(Z, z1+1, Tvec)
         else:
           drrate = numpy.zeros(len(Tvec))
 
-        if self.ionrecdata[Z][z1]['RR'] != False:
-          rrrate = self.calc_rr_rate(Z, z1, Tvec)
+        if self.ionrecdata[Z][z1+1]['RR'] != False:
+          rrrate = self.calc_rr_rate(Z, z1+1, Tvec)
         else:
           rrrate = numpy.zeros(len(Tvec))
 
@@ -638,7 +638,6 @@ class kappamodel():
     self.ebins = ebins
 
     if ebins_checksum != self.ebins_checksum:
-#      print("setting ebins")
       self.ebins_checksum = ebins_checksum
       for Z in self.elements:
         #if Z=='temperatures': continue
