@@ -1,5 +1,4 @@
 import numpy, pickle, os, hashlib
-import astropy.io.fits as pyfits
 
 # import bits from pyatomdb.
 
@@ -389,6 +388,9 @@ class KappaSession(CIESession):
                 first index is temperature, second is tau.
 
     """
+    
+    print(" NOTE NOT FUNCTIONAL YET - returning")
+    return
 
     Tevec, Teisvec = util.make_vec(Telist)
     tauvec, tauisvec = util.make_vec(taulist)

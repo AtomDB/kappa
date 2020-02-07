@@ -14,7 +14,9 @@ The AtomDB Kappa model uses the non-equilibrium emissivity data from the AtomDB 
 1. The Hahn and Savin coefficients are calculated, to seee what Maxwellian temperatures (Tm) are required and with what normalizations to create the kappa distribution
 
 2. The ionization and recombination rates are calculated at each Tm, and then summed to provide kappa ionization and recombination rates. For Tm outside the nominal 10^4 to 10^9 Kelvin range of AtomDB data, the ionization and recombination data can be extrappolated fairly safely.
+
 3. The ionization fraction for each ion is calculated using these kappa ionization and recombination rates
+
 4. For each ion present in the resulting ionization fraction, the spectrum is calculated at each Tm and then summed appropriately to give a final specturm. As spectra cannot easily be extrappolated, and Tm outside 10^4 to 10^9 K are ignored. Again, this can lead to unrealistic results. 
 
 
@@ -25,20 +27,22 @@ The AtomDB Kappa model uses the non-equilibrium emissivity data from the AtomDB 
 =======================
 Installation
 =======================
-Standard python installation
 
-.. code-block:: bash
+Requires:
 
-   python setup.py install
+python 3
+pyatomdb >= 0.8.0
+numpy
+astropy
+scipy
 
-.. note::
-   Kronos is a python 3 only module. Depending on your system's setup, you may need to substitute ``python3`` for all references to ``python``.
+pylab for demonstration
 
-There are several useful flags that can be provided to this call, depending on your system:
+No installation necessary. Make sure the folder is somewhere in your python path (or start python from within this directory). 
 
-  - ``--user`` flag causes installation in the user's home directory (useful if you lack root priviliges)
+kappa.py contains the code. Suggested to start new code with "import kappa" and then take it from there.
 
-  - ``develop`` instead of ``install`` will install links to the current directory. This is useful if you want to edit/debug/develop the files further.
+There is a wrapper for XSPEC, kappa_xspec.py. See test_kappa.py for a quick example of loading the 3 models into xspec.
 
 =====
 Usage
@@ -50,11 +54,16 @@ Mostly just make a kappa object, then call it
 
   import kappa
   # make a quick, 2-elements kapp model
-  a=kappa.kappamodel(elements=[6,8])
+  a=kappa.KappaSession()
+  
+  # set the response (here a dummy, can use filenames)
   ebins = numpy.linspace(0.01,5,1001)
+  
+  a.set_response(ebins, raw=True)
+  
   kp = 5.0
   T = 2e5
-  spectrum = a.calc_spectrum(kp, T, ebins)
+  spectrum = a.return_spectrum(T, kp, teunit='K')
 
 
 -----
@@ -117,6 +126,10 @@ Initial release
 July 9th 2019
 Error in the ionization balance calculation fixed.
 
+0.3.0
+February 7th 2020
+Found minor error in published H&S table, affecting Kappa > 18. Fixed.
+Converted interface to pyatomdb sepectrum module updates from pyatomdb v0.8
 
 
 .. _pyxspec: https://heasarc.gsfc.nasa.gov/xanadu/xspec/python/html/index.html
