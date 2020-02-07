@@ -1,15 +1,27 @@
-import kappa, numpy, xspec
+import kappa2 as kappa
+import numpy, xspec, pyatomdb
 
 # You may need to change these. These are the line and continuum file locations from atomdb
 # below are the defaults.
-compfilename = "$ATOMDB/apec_nei_comp.fits"
-linefilename = "$ATOMDB/apec_nei_line.fits"
+#compfilename = "$ATOMDB/apec_nei_comp.fits"
+#linefilename = "$ATOMDB/apec_nei_line.fits"
 
 # These are globals to hold the model data
-kappamodelobject = kappa.kappamodel(elements=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,28],\
-                                        linefile = linefilename,\
-                                        compfile = compfilename)
+kappamodelobject = kappa.KappaSession(elements=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,28])
+                                       # linefile = linefilename,\
+                                       # compfile = compfilename)
+kappavmodelobject = False
 kappavvmodelobject = False
+
+
+kappamodelobject.abund_xspectoatomdb={}
+kappamodelobject.abund_xspectoatomdb['angr']='AG89'
+kappamodelobject.abund_xspectoatomdb['aspl']='Asplund09'
+kappamodelobject.abund_xspectoatomdb['feld']='Feldman'
+kappamodelobject.abund_xspectoatomdb['aneb']='AE82'
+kappamodelobject.abund_xspectoatomdb['grsa']='GS98'
+kappamodelobject.abund_xspectoatomdb['wilm']='Wilm00'
+kappamodelobject.abund_xspectoatomdb['lodd']='Lodd03'
 
 
 
@@ -98,18 +110,31 @@ def kappa(engs, params, flux):
 
   # This is the call that will return everything. So set everything!
   ebins = numpy.array(engs)
-
+  kappamodelobject.set_response(ebins, raw=True)
   # kappa model has the 14 main elements
-  kappamodelobject.elements = [1,2,6,7,8,10,12,13,14,16,18,20,26,28]
+  elarray = kappamodelobject.elements
+  abund=numpy.zeros(len(elarray))
+  print('elarray',elarray)
+  abund[0]= 1.0
+  abund[1]= 1.0
+
+  abund[numpy.array([6,7,8,10,12,13,14,16,18,20,26,27])-1] = params[2]
+
+  T = params[0]
+  k = params[1]
+#  abund = params[2]
 
 
-  abundset = xspec.Xset.abund
+  # correct abundance set if required
+  if kappamodelobject.abund_xspectoatomdb[xspec.Xset.abund] != kappamodelobject.abundset:
+    kappamodelobject.set_abundset(kappamodelobject.abund_xspectoatomdb[xspec.Xset.abund])
 
-  T = params[0]*11604.5*1000
-  kappa = params[1]
-  abund = params[2]
+  # set the abundance
+  print('whee')
+  kappamodelobject.set_abund(elarray, abund)
+  print('whoo')
 
-  spec = kappamodelobject.calc_spectrum(kappa, T, ebins, abund = abund, abundset = abundset)
+  spec = kappamodelobject.return_spectrum(T, k)
 
   flux[:] = spec*1e14
 
@@ -144,32 +169,31 @@ def vkappa(engs, params, flux):
 
   # This is the call that will return everything. So set everything!
   ebins = numpy.array(engs)
+  kappamodelobject.set_response(ebins, raw=True)
 
   # kappa model has the 14 main elements
-  kappamodelobject.elements = [1,2,6,7,8,10,12,13,14,16,18,20,26,28]
+#  kappamodelobject.elements = [1,2,6,7,8,10,12,13,14,16,18,20,26,28]
 
 
   abundset = xspec.Xset.abund
 
-  T = params[0]*11604.5*1000
-  kappa = params[1]
-  abund = {}
-  abund[1]  =  params[2]
-  abund[2]  =  params[3]
-  abund[6]  =  params[4]
-  abund[7]  =  params[5]
-  abund[8]  =  params[6]
-  abund[10] =  params[7]
-  abund[12] =  params[8]
-  abund[13] =  params[9]
-  abund[14] = params[10]
-  abund[16] = params[11]
-  abund[18] = params[12]
-  abund[20] = params[13]
-  abund[26] = params[14]
-  abund[28] = params[15]
+  T = params[0]
+  k= params[1]
 
-  spec = kappamodelobject.calc_spectrum(kappa, T, ebins, abund = abund, abundset = abundset)
+  # correct abundance set if required
+  if kappamodelobject.abund_xspectoatomdb[xspec.Xset.abund] != kappamodelobject.abundset:
+    kappamodelobject.set_abundset(kappamodelobject.abund_xspectoatomdb[xspec.Xset.abund])
+
+  # set the abundance
+  elarray = kappamodelobject.elements
+  abund = numpy.zeros(len(elarray))
+  print(elarray, abund)
+  abund[numpy.array([1,2,6,7,8,10,12,13,14,16,18,20,26,27])-1] = params[2:16]
+  kappamodelobject.set_abund(elarray, abund)
+
+
+  spec = kappamodelobject.return_spectrum(T, k)
+
 
   flux[:] = spec*1e14
 
@@ -203,6 +227,7 @@ def vvkappa(engs, params, flux):
 
   # This is the call that will return everything. So set everything!
   ebins = numpy.array(engs)
+  kappamodelobject.set_response(ebins, raw=True)
 
   # kappa model has the 14 main elements
   Zlist = list(range(1,27))
@@ -212,8 +237,8 @@ def vvkappa(engs, params, flux):
 
   abundset = xspec.Xset.abund
 
-  T = params[0]*11604.5*1000
-  kappa = params[1]
+  T = params[0]
+  k = params[1]
   abund = {}
   abund[1]  =  params[2]
   abund[2]  =  params[3]
@@ -243,7 +268,18 @@ def vvkappa(engs, params, flux):
   abund[26] =  params[27]
   abund[28] =  params[28]
 
-  spec = kappamodelobject.calc_spectrum(kappa, T, ebins, abund = abund, abundset = abundset)
+  # correct abundance set if required
+  if kappamodelobject.abund_xspectoatomdb[xspec.Xset.abund] != kappamodelobject.abundset:
+    kappamodelobject.set_abundset(kappamodelobject.abund_xspectoatomdb[xspec.Xset.abund])
+
+  # set the abundance
+  elarray = kappamodelobject.elements
+  kappamodelobject.set_abund(elarray, params[2:29])
+
+
+  spec = kappamodelobject.return_spectrum(T, k)
+
+
 
   flux[:] = spec*1e14
 
