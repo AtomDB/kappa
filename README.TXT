@@ -131,5 +131,9 @@ February 7th 2020
 Found minor error in published H&S table, affecting Kappa > 18. Fixed.
 Converted interface to pyatomdb sepectrum module updates from pyatomdb v0.8
 
+1.0.0
+March 6th 2020
+Released at version 1.0.0. No other changes to 0.3.0
+
 
 .. _pyxspec: https://heasarc.gsfc.nasa.gov/xanadu/xspec/python/html/index.html

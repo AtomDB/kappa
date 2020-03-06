@@ -1,7 +1,6 @@
 import numpy, pickle, os, hashlib
 
 # import bits from pyatomdb.
-
 from pyatomdb import apec, util, const, atomdb, pyfits
 from pyatomdb.spectrum import *
 """
@@ -14,6 +13,14 @@ Method is:
   - Sum spectra to get... well, a spectrum.
 
 """
+
+# set version number
+
+# March 6th 2020, ARF:
+__version__='1.0.0'
+
+
+
 class hs_data():
   """
   Class to store the read in Hahn & Savin Data.
