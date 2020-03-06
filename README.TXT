@@ -20,9 +20,9 @@ The AtomDB Kappa model uses the non-equilibrium emissivity data from the AtomDB 
 4. For each ion present in the resulting ionization fraction, the spectrum is calculated at each Tm and then summed appropriately to give a final specturm. As spectra cannot easily be extrappolated, and Tm outside 10^4 to 10^9 K are ignored. Again, this can lead to unrealistic results. 
 
 
-.. [1] Hahn and Savin Paper
-.. [2] Cui, in prep
-.. [3] Bryans 2009
+.. [1] Hahn and Savin (2015) `2015ApJ...800...68H <https://ui.adsabs.harvard.edu/abs/2015ApJ...800...68H/abstract>`_
+.. [2] Cui, Foster, Yuasa and Smith (2019), `2019ApJ...887..182C<https://ui.adsabs.harvard.edu/abs/2019ApJ...887..182C/abstract>`_
+.. [3] Bryans (2009) `2009ApJ...691.1540B<https://ui.adsabs.harvard.edu/abs/2009ApJ...691.1540B/abstract>_`
 
 =======================
 Installation
@@ -137,3 +137,4 @@ Released at version 1.0.0. No other changes to 0.3.0
 
 
 .. _pyxspec: https://heasarc.gsfc.nasa.gov/xanadu/xspec/python/html/index.html
+
