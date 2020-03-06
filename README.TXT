@@ -22,7 +22,7 @@ The AtomDB Kappa model uses the non-equilibrium emissivity data from the AtomDB 
 
 .. [1] Hahn and Savin (2015) `2015ApJ...800...68H <https://ui.adsabs.harvard.edu/abs/2015ApJ...800...68H/abstract>`_
 .. [2] Cui, Foster, Yuasa and Smith (2019), `2019ApJ...887..182C <https://ui.adsabs.harvard.edu/abs/2019ApJ...887..182C/abstract>`_
-.. [3] Bryans (2009) `2009ApJ...691.1540B <https://ui.adsabs.harvard.edu/abs/2009ApJ...691.1540B/abstract>_`
+.. [3] Bryans (2009) `2009ApJ...691.1540B <https://ui.adsabs.harvard.edu/abs/2009ApJ...691.1540B/abstract>`_
 
 =======================
 Installation
