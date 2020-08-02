@@ -136,6 +136,9 @@ Converted interface to pyatomdb sepectrum module updates from pyatomdb v0.8
 March 6th 2020
 Released at version 1.0.0. No other changes to 0.3.0
 
+1.1.0
+August 2nd 2020
+Updated interfaces to work with updated pyatomdb 0.10.0 and later
 
 .. _pyxspec: https://heasarc.gsfc.nasa.gov/xanadu/xspec/python/html/index.html
 
