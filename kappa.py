@@ -1,8 +1,8 @@
 import numpy, pickle, os, hashlib
 
 # import bits from pyatomdb.
-from pyatomdb import apec, util, const, atomdb, pyfits
-from pyatomdb.spectrum import *
+from pyatomdb import apec, util, const, atomdb, pyfits, spectrum
+
 """
 This modules is designed to generate kappa specta.
 Method is:
@@ -81,7 +81,7 @@ class hs_data():
 
     return Tlist, kappacoeff
 
-class KappaSession(CIESession):
+class KappaSession(spectrum.CIESession):
   """
   Load and generate a Kappa spectrum
 
@@ -227,7 +227,7 @@ class KappaSession(CIESession):
     self.docont=True # Include continuum in spectrum
     self.dopseudo=True # Include pseudo continuum in spectrum
     self.set_broadening(False, broaden_limit=1e-18)
-    self.cdf = Gaussian_CDF()
+    self.cdf = spectrum._Gaussian_CDF()
 
   def set_apec_files(self, linefile="$ATOMDB/apec_nei_line.fits",\
                      cocofile="$ATOMDB/apec_nei_comp.fits"):
@@ -322,7 +322,7 @@ class KappaSession(CIESession):
       print('exiting as not functional')
       return
 
-    kT = convert_temp(Te, teunit, 'keV')
+    kT = util.convert_temp(Te, teunit, 'keV')
 
     el_list = self.elements
     ab = {}
@@ -403,7 +403,7 @@ class KappaSession(CIESession):
     tauvec, tauisvec = util.make_vec(taulist)
 
 
-    kTlist = convert_temp(Tevec, teunit, 'keV')
+    kTlist = util.convert_temp(Tevec, teunit, 'keV')
     if apply_abund:
       ab = self.abund[Z]*self.abundsetvector[Z]
     else:
@@ -508,7 +508,7 @@ class KappaSession(CIESession):
                                     abundances=ab, log_interp=True,\
                                     broaden_object=self.cdf)
 
-    ss = self.apply_response(s)
+    ss = self._apply_response(s)
 
     return ss
 
@@ -536,7 +536,7 @@ class KappaSession(CIESession):
 
 
 
-class KappaSpectrum(CIESpectrum):
+class KappaSpectrum(spectrum._CIESpectrum):
   """
   A class holding the emissivity data for NEI emission, and returning
   spectra
@@ -675,8 +675,8 @@ class KappaSpectrum(CIESpectrum):
     appropriately between neighboring temperature bins
 
     """
-    T = convert_temp(Te, teunit, 'K')
-    kT = convert_temp(Te, teunit, 'keV')
+    T = util.convert_temp(Te, teunit, 'K')
+    kT = util.convert_temp(Te, teunit, 'keV')
 
 
     # Recalc fractions if required
@@ -739,8 +739,8 @@ class KappaSpectrum(CIESpectrum):
 
     # get kT in keV
 
-    T = convert_temp(Te, teunit, 'K')
-    kT = convert_temp(Te, teunit, 'keV')
+    T = util.convert_temp(Te, teunit, 'K')
+    kT = util.convert_temp(Te, teunit, 'keV')
 
 
     # find the correct coefficients here
@@ -850,7 +850,7 @@ class KappaSpectrum(CIESpectrum):
 
     import collections
 
-    kT = convert_temp(Te, teunit, 'keV')
+    kT = util.convert_temp(Te, teunit, 'keV')
 
     ikT, f = self.get_nearest_Tindex(kT, \
                                      teunit='keV', \
@@ -875,7 +875,7 @@ class KappaSpectrum(CIESpectrum):
         else:
           pass
       else:
-        kT_in = convert_temp(init_pop, teunit, 'keV')
+        kT_in = util.convert_temp(init_pop, teunit, 'keV')
         ipop = apec.solve_ionbal_eigen(Z, \
                                       kT_in, \
                                       teunit='keV', \
@@ -952,7 +952,7 @@ class KappaSpectrum(CIESpectrum):
 
     """
     # get kT in keV
-    kT = convert_temp(Te, teunit, 'keV')
+    kT = util.convert_temp(Te, teunit, 'keV')
 
 
     ikT, f = self.get_nearest_Tindex(kT, teunit='keV', nearest=nearest)
@@ -993,7 +993,7 @@ class KappaSpectrum(CIESpectrum):
             else:
               pass
           else:
-            kT_in = convert_temp(init_pop, teunit, 'keV')
+            kT_in = util.convert_temp(init_pop, teunit, 'keV')
             ipop = apec.solve_ionbal_eigen(Z, \
                                           kT_in, \
                                           teunit='keV', \
@@ -1457,11 +1457,11 @@ class ir_data():
           (cidat['par_type']<=const.CI_DERE+20)):
       ionpot = self.ionrecdata[Z][z1]['IP_DERE']
       Tvec, wasTvec = make_vec(T)
-      ci = atomdb.calc_ionrec_ci(cidat, Tvec, extrap=True, ionpot=ionpot)
+      ci = atomdb._calc_ionrec_ci(cidat, Tvec, extrap=True, ionpot=ionpot)
 
     else:
       Tvec, wasTvec = make_vec(T)
-      ci = atomdb.calc_ionrec_ci(cidat,Tvec, extrap=True)
+      ci = atomdb._calc_ionrec_ci(cidat,Tvec, extrap=True)
 
 
     return ci
@@ -1491,7 +1491,7 @@ class ir_data():
 
     drdat = self.ionrecdata[Z][z1]['DR']
 
-    dr = atomdb.calc_ionrec_dr(drdat, T, extrap=True)
+    dr = atomdb._calc_ionrec_dr(drdat, T, extrap=True)
     return dr
 #-------------------------------------------------------------------------------
 
@@ -1517,7 +1517,7 @@ class ir_data():
 
     rrdat = self.ionrecdata[Z][z1]['RR']
 
-    rr = atomdb.calc_ionrec_rr(rrdat, T, extrap=True)
+    rr = atomdb._calc_ionrec_rr(rrdat, T, extrap=True)
     return rr
 #-------------------------------------------------------------------------------
 
@@ -1543,7 +1543,7 @@ class ir_data():
 
     eadat = self.ionrecdata[Z][z1]['EA']
 
-    ea = atomdb.calc_ionrec_ea(eadat, T, extrap=True)
+    ea = atomdb._calc_ionrec_ea(eadat, T, extrap=True)
     return ea
 
 

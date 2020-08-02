@@ -52,18 +52,22 @@ Mostly just make a kappa object, then call it
 
 .. code-block:: python
 
-  import kappa
-  # make a quick, 2-elements kapp model
+  import kappa, numpy
+
+  # make a kappa model
   a=kappa.KappaSession()
   
-  # set the response (here a dummy, can use filenames)
+  # set the response (here a dummy, can use rmf and arf filenames too)
   ebins = numpy.linspace(0.01,5,1001)
-  
   a.set_response(ebins, raw=True)
   
+  # define the kappa parameters
   kp = 5.0
   T = 2e5
+  
+  # fetch the spectrum, in photons bin-1 cm^3 s^-1
   spectrum = a.return_spectrum(T, kp, teunit='K')
+
 
 
 -----
@@ -76,19 +80,16 @@ The kappa_xspec module contains all you need to load the kappa model into XSPEC.
 
 .. code-block:: python
 
-  # import the xspec python module
-  import xspec
-  # import  acx2 wrapper
-  import kappa_xspec
+  from kappa_xspec import *
 
 Once this is done, the data will load.
 
 
 Three different models are loaded:
 
-- kappa : Emission from kappa spectrum with the 14 main elements. Abundance is tied between all elements (so there is only 1 abundance keyword). Analogous to the apec model.
-- vkappa : Emission from kappa spectrum with the 14 main elements. Abundance is free to vary between all the elements (though it starts frozen). Analagous to the vapec model.
-- vvkappa : Emission from 27 elements, H through Ni excluding Co. Abundance is free to vary between all the elements.
+- pykappa : Emission from kappa spectrum with the 14 main elements. Abundance is tied between all elements (so there is only 1 abundance keyword). Analogous to the apec model.
+- pyvkappa : Emission from kappa spectrum with the 14 main elements. Abundance is free to vary between all the elements (though it starts frozen). Analagous to the vapec model.
+- pyvvkappa : Emission from 27 elements, H through Ni excluding Co. Abundance is free to vary between all the elements.
 
 .. note::
   Note that in the kappa and vkappa cases, unlike in the apec and vapec models, the effective abundance of the minor recombining elements is 0, not solar. This speeds up calculation time and does not significantly affect the resulting emission.
@@ -111,7 +112,7 @@ Model parameters
 +--------------+-----------------------------------------------------------------------------------+
 | kappa        | The degree of non-Maxwellianness of the electrons                                 |
 +--------------+-----------------------------------------------------------------------------------+
-| abund        | recombining elemental abundances. (given by individual element in vacx and vvacx) |
+| abund        | recombining elemental abundances. (given by individual element in pyvkappa and pyvvkappa) |
 +--------------+-----------------------------------------------------------------------------------+
 
 

@@ -1,40 +1,57 @@
-import xspec, kappa2, pylab
+from kappa_xspec import *
+import  pylab
 
-import kappa_xspec
+# declare a graph for loglogting
 fig= pylab.figure()
 fig.show()
-ax = fig.add_subplot(111)
+ax1 = fig.add_subplot(211)
+ax2 = fig.add_subplot(212, sharex=ax1)
 
-s1=xspec.Spectrum('hello.fak')
-
-
-
-#fs1 = xspec.FakeitSettings(response='acisi_aimpt_cy22.rmf',\
-#                           arf='acisi_aimpt_cy22.arf',\
-#                           exposure = 1e6,\
-#                           fileName = 'hello.fak')
+# set xAxis to energy
 xspec.Plot.xAxis='keV'
 
-print("PING1")
-m1 = xspec.Model('kappa')
+# declare the kappa model
+m1 = xspec.Model('pykappa')
 
+# turn off XSPEC loglog windows
 xspec.Plot.device='/null'
-#xspec.AllData.fakeit(1, [fs1])
 
-xspec.Plot('data')
+m1.pykappa.kappa = 2.5
+xspec.Plot('model')
 
-ax.plot(xspec.Plot.x(), xspec.Plot.model())
+ax1.loglog(xspec.Plot.x(), xspec.Plot.model(), label='kappa=2.5')
 
+m1.pykappa.kappa = 25.0
+xspec.Plot('model')
+ax1.loglog(xspec.Plot.x(), xspec.Plot.model(), label='kappa=25')
+ax1.set_xlim([0.3,10.0])
 
-m2 = xspec.Model('vkappa')
-xspec.Plot('data')
+ax1.legend(loc=0)
 
-ax.plot(xspec.Plot.x(), xspec.Plot.model())
+m1 = xspec.Model('pyvkappa')
+xspec.Plot('model')
 
+ax2.loglog(xspec.Plot.x(), xspec.Plot.model(), label='all')
+m1.pyvkappa.C = 0.0
+m1.pyvkappa.N = 0.0
+m1.pyvkappa.O = 0.0
+m1.pyvkappa.Ne = 0.0
+m1.pyvkappa.Mg = 0.0
+m1.pyvkappa.Al = 0.0
+m1.pyvkappa.Si = 0.0
+m1.pyvkappa.S = 0.0
+m1.pyvkappa.Ar = 0.0
+m1.pyvkappa.Ca = 0.0
+m1.pyvkappa.Ni = 0.0
+m1.pyvkappa.Fe = 3.0
+xspec.Plot('model')
+ax2.loglog(xspec.Plot.x(), xspec.Plot.model(), label = 'Fe=3.0 only')
+ax2.legend(loc=0)
 
-m3 = xspec.Model('vvkappa')
-xspec.Plot('data')
-
-ax.plot(xspec.Plot.x(), xspec.Plot.model())
 pylab.draw()
-zzz=input()
+zzz=input('Press any key to continue')
+
+fig.savefig('test_kappa.pdf')
+fig.savefig('test_kappa.svg')
+fig.savefig('test_kappa.png')
+
