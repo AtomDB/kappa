@@ -140,5 +140,9 @@ Released at version 1.0.0. No other changes to 0.3.0
 August 2nd 2020
 Updated interfaces to work with updated pyatomdb 0.10.0 and later
 
+1.1.1
+October 23rd 2020
+Bugfix to allow model to load with new pyatomdb interface (thank you to Anna Ogorzalek)
+
 .. _pyxspec: https://heasarc.gsfc.nasa.gov/xanadu/xspec/python/html/index.html
 

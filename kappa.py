@@ -17,7 +17,10 @@ Method is:
 # set version number
 
 # March 6th 2020, ARF:
-__version__='1.0.0'
+#__version__='1.1.0'
+
+# October 23rd 2020 ARF: Fixed bug caused by updates to pyatomdb
+__version__='1.1.1'
 
 
 
@@ -395,7 +398,7 @@ class KappaSession(spectrum.CIESession):
                 first index is temperature, second is tau.
 
     """
-    
+
     print(" NOTE NOT FUNCTIONAL YET - returning")
     return
 
@@ -617,7 +620,7 @@ class KappaSpectrum(spectrum._CIESpectrum):
 
             if len(ccdat)==0:
               ccdat = [False]
-            self.spectra[ihdu][Z][z1]=ElementSpectrum(ldat[isgood],\
+            self.spectra[ihdu][Z][z1]=spectrum._ElementSpectrum(ldat[isgood],\
                                                   ccdat[0], Z, z1_drv=z1)
 
 
