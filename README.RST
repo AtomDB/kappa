@@ -50,26 +50,17 @@ Usage
 
 Mostly just make a kappa object, then call it
 
-.. code-block:: python
-
-  import kappa, numpy
-
-  # make a kappa model
-  a=kappa.KappaSession()
-  
-  # set the response (here a dummy, can use rmf and arf filenames too)
-  ebins = numpy.linspace(0.01,5,1001)
-  a.set_response(ebins, raw=True)
-  
-  # define the kappa parameters
-  kp = 5.0
-  T = 2e5
-  
-  # fetch the spectrum, in photons bin-1 cm^3 s^-1
-  spectrum = a.return_spectrum(T, kp, teunit='K')
+.. literalinclude:: test_kappa_noxspec.py
+  :language: python3
 
 
+.. figure:: test_kappa_noxspec.svg
+    :align: center
+    :alt: Kappa module example
+    :figclass: align-center
 
+    Kappa Module Example
+    
 -----
 XSPEC
 -----
@@ -98,7 +89,7 @@ Once you have this, models can be used in pyxspec in the usual way, e.g.
 
 .. code-block:: python
 
-  m = xspec.Model('tbabs(pow+kappa)')
+  m = xspec.Model('tbabs(pow+pykappa)')
 
 
 ++++++++++++++++
@@ -115,6 +106,18 @@ Model parameters
 | abund        | recombining elemental abundances. (given by individual element in pyvkappa and pyvvkappa) |
 +--------------+-----------------------------------------------------------------------------------+
 
+An example of using the model in xspec:
+
+.. literalinclude:: test_kappa.py
+  :language: python3
+
+
+.. figure:: test_kappa.svg
+    :align: center
+    :alt: Kappa XSPEC module example
+    :figclass: align-center
+
+    Kappa module example with XSPEC
 
 ===============
 Version History
@@ -143,6 +146,13 @@ Updated interfaces to work with updated pyatomdb 0.10.0 and later
 1.1.1
 October 23rd 2020
 Bugfix to allow model to load with new pyatomdb interface (thank you to Anna Ogorzalek)
+
+1.2.0
+# November 2nd 2020
+Fixed error in hahnsavin.fits file affecting 5.2<=kappa<7.3. (wrong value was in published paper, right value was in accompanying IDL code)
+Recoded much of the Session and Spectrum process to use the same routines as the NEISpectrum and NEISession classes in pyatomdb
+Made the return_line_emissivity and return_linelist functions work
+Made dolines, docont and dopseudo keywords work
 
 .. _pyxspec: https://heasarc.gsfc.nasa.gov/xanadu/xspec/python/html/index.html
 

@@ -20,8 +20,16 @@ Method is:
 #__version__='1.1.0'
 
 # October 23rd 2020 ARF: Fixed bug caused by updates to pyatomdb
-__version__='1.1.1'
+#__version__='1.1.1'
 
+# November 2nd 2020 ARF: Several updates:
+#  - Fixed error in hahnsavin.fits file affecting 5.2<=kappa<7.3
+#    (wrong value was in published paper, right value was in accompanying IDL code)
+#  - Recoded much of the Session and Spectrum process to use
+#    the same routines as the NEISpectrum and NEISession classes in pyatomdb
+#  - Made the return_line_emissivity and return_linelist functions work
+#  - Made doline, docont and dopseudo keywords work
+__version__='1.2.0'
 
 
 class hs_data():
@@ -177,17 +185,8 @@ class KappaSession(spectrum.CIESession):
     """
 
 
-    self.datacache={}
-
-    # Open up the APEC files
-    self.set_apec_files(linefile, cocofile)
-
-
-    # if elements are specified, use them. Otherwise, use Z=1-30
-    if util.keyword_check(elements):
-      self.elements = elements
-    else:
-      self.elements=list(range(1,const.MAXZ_NEI+1))
+    self.SessionType='Kappa'
+    self._session_initialise1(linefile, cocofile, elements, abundset)
 
     # define the directories & other data files
     if kappadir==None:
@@ -200,37 +199,14 @@ class KappaSession(spectrum.CIESession):
     self.hsdatafile = os.path.expandvars(hsdatafile)
     self.ionrecdatafile = os.path.expandvars(ionrecdatafile)
 
-    # a hold for the spectra
-    self.spectra=KappaSpectrum(self.linedata, self.cocodata, \
-                               self.hsdatafile, self.ionrecdatafile,
-                               elements = self.elements)
+    self.spectra=_KappaSpectrum(self.linedata, self.cocodata, \
+                                self.hsdatafile, self.ionrecdatafile,
+                                elements = self.elements)
+
+    self._session_initialise2()
 
 
-    # Set both the current and the default abundances to those that
-    # the apec data was calculated on
-    self.abundset=self.linedata[0].header['SABUND_SOURCE']
-    self.default_abundset=self.linedata[0].header['SABUND_SOURCE']
 
-    self.abundsetvector = numpy.zeros(const.MAXZ_NEI+1)
-    for Z in self.elements:
-      self.abundsetvector[Z] = 1.0
-
-    #  but if another vector was already specified, use this instead
-    if util.keyword_check(abundset):
-      self.set_abundset(abundset)
-
-    self.abund = numpy.zeros(const.MAXZ_NEI+1)
-
-    for Z in self.elements:
-      self.abund[Z]=1.0
-
-    # Set a range of parameters which can be overwritten later
-    self.response_set = False # have we loaded a response file?
-    self.dolines=True # Include lines in spectrum
-    self.docont=True # Include continuum in spectrum
-    self.dopseudo=True # Include pseudo continuum in spectrum
-    self.set_broadening(False, broaden_limit=1e-18)
-    self.cdf = spectrum._Gaussian_CDF()
 
   def set_apec_files(self, linefile="$ATOMDB/apec_nei_line.fits",\
                      cocofile="$ATOMDB/apec_nei_comp.fits"):
@@ -289,8 +265,9 @@ class KappaSession(spectrum.CIESession):
         print("Unknown data type for cocofile. Please pass a string or an HDUList")
 
 
-  def return_linelist(self, Te, tau, specrange, specunit='A', \
-                               teunit='keV', apply_aeff=False, develop=False):
+  def return_linelist(self, Te, kappa, specrange, specunit='A', \
+                               teunit='keV', apply_aeff=False, \
+                               develop=False):
     """
     Get the list of line emissivities vs wavelengths
 
@@ -299,8 +276,8 @@ class KappaSession(spectrum.CIESession):
     ----------
     Te : float
       Temperature in keV or K
-    tau : float
-      ionization timescale, ne * t (cm^-3 s).
+    kappa : float
+      Non Maxwellian kappa parameter. Must be > 1.5.
     specrange : [float, float]
       Minimum and maximum values for interval in which to search
     specunit : {'Angstrom','keV'}
@@ -319,11 +296,7 @@ class KappaSession(spectrum.CIESession):
 
     """
 
-    print("WARNING: THIS IS IN DEVELOPMENT AND DOESN'T WORK YET")
 
-    if not develop:
-      print('exiting as not functional')
-      return
 
     kT = util.convert_temp(Te, teunit, 'keV')
 
@@ -334,38 +307,36 @@ class KappaSession(spectrum.CIESession):
 
 
 
-    s= self.spectra.return_linelist(kT, tau, specrange=specrange, teunit='keV',\
-                                        specunit=specunit, elements=self.elements,\
-                                        abundances = ab)
+    s= self.spectra.return_linelist(kT, kappa, \
+                                    specrange=specrange, teunit='keV',\
+                                    specunit=specunit, elements=self.elements,\
+                                    abundance = ab, log_interp=True)
 
     # do the response thing
     #resp  = s.response()
 
     if apply_aeff == True:
-      ibin = numpy.zeros(len(s), dtype=int)
-      for i, ss in enumerate(s):
-        e = const.HC_IN_KEV_A/ss['Lambda']
-        ibin[i] = numpy.where(self.specbins<e)[0][-1]
 
-      s["Epsilon_Err"] = s['Epsilon']*self.aeff[ibin]
+      epsilon_aeff =  self._apply_linelist_aeff(s, specunit, apply_binwidth)
 
+      s['Epsilon_Err'] = epsilon_aeff
     return(s)
 
 
-  def return_line_emissivity(self, Telist, taulist, Z, z1, up, lo, \
-                             specunit='A', teunit='keV', \
+  def return_line_emissivity(self, Telist, kappalist, Z, z1, up, lo, specunit='A',
+                             teunit='keV',
                              apply_aeff=False, apply_abund=True,\
-                             log_interp = True, init_pop='ionizing'):
+                             log_interp = True):
     """
-    Get line emissivity as function of Te, tau. Assumes ionization from neutral.
+    Return the emissivity of a line at kT, tau. Assumes ionization from neutral for now
 
 
     Parameters
     ----------
     Telist : float or array(float)
       Temperature(s) in keV or K
-    taulist : float
-      ionization timescale(s), ne * t (cm^-3 s).
+    kappa : float or array(float)
+      Non Maxwellian kappa parameter. Must be > 1.5.
     Z : int
       nuclear charge of element
     z1 : int
@@ -377,61 +348,57 @@ class KappaSession(spectrum.CIESession):
     specunit : {'Angstrom','keV'}
       Units for wavelength or energy (a returned value)
     teunit : {'keV' , 'K'}
-      Units of Telist (kev or K, default keV)
-    apply_aeff : bool
-      If true, apply the effective area to the line emissivity in the
-      linelist to modify their intensities.
-    apply_abund : bool
-      If true, apply the abundance set in the session to the result.
+      Units of Te (kev or K, default keV)
+    abundance : float
+      Abundance to multiply the emissivity by
     log_interp : bool
-      Interpolate between temperature on a log-log scale (default).
-      Otherwise linear
+      Perform linear interpolation on a logT/logEpsilon grid (default), or linear.
 
     Returns
     -------
     ret : dict
       Dictionary containing:
-      Te, tau, teunit: as input
+      Te, kappa, teunit: as input
       wavelength : line wavelength (A)
       energy : line energy (keV)
       epsilon : emissivity in ph cm^3 s-1 (or ph cm^5 s^-1 if apply_aeff=True)
-                first index is temperature, second is tau.
+                first index is temperature, second is kappa. If Te or kappa was
+                supplied as a scalar, then that index is removed
 
     """
 
-    print(" NOTE NOT FUNCTIONAL YET - returning")
-    return
-
     Tevec, Teisvec = util.make_vec(Telist)
-    tauvec, tauisvec = util.make_vec(taulist)
+    kappavec, kappaisvec = util.make_vec(kappalist)
 
 
     kTlist = util.convert_temp(Tevec, teunit, 'keV')
+
+    eps = numpy.zeros([len(Tevec), len(kappavec)])
+    ret={}
+    ret['wavelength'] = None
+
+
     if apply_abund:
       ab = self.abund[Z]*self.abundsetvector[Z]
     else:
       ab = 1.0
 
-    eps = numpy.zeros([len(Tevec), len(tauvec)])
-    ret={}
-    ret['wavelength'] = None
-    for itau, tau in enumerate(tauvec):
+    for ikappa, kappa in enumerate(kappavec):
       for ikT, kT in enumerate(kTlist):
-        e, lam = self.spectra.return_line_emissivity(kT, tau, Z, z1, \
+        e, lam = self.spectra.return_line_emissivity(kT, kappa, Z, z1, \
                                                      up, lo, \
                                                      specunit='A', \
                                                      teunit='keV', \
-                                                     abundance=ab,\
-                                                     init_pop=init_pop)
+                                                     abundance=ab)
 
-        eps[ikT, itau] = e
+        eps[ikT, ikappa] = e
         if lam != False:
           ret['wavelength'] = lam * 1.0
         else:
           ret['wavelength'] = None
 
     ret['Te'] = Telist
-    ret['tau'] = taulist
+    ret['kappa'] = kappalist
     ret['teunit'] = teunit
     if ret['wavelength'] != None:
       ret['energy'] = const.HC_IN_KEV_A/ret['wavelength']
@@ -448,7 +415,7 @@ class KappaSession(spectrum.CIESession):
 
     # now correct for vectors
 
-    if not tauisvec:
+    if not kappaisvec:
       eps=eps[:,0]
       if not Teisvec:
         eps = eps[0]
@@ -460,8 +427,9 @@ class KappaSession(spectrum.CIESession):
 
     return ret
 
-  def return_spectrum(self,  Te, kappa, teunit='keV', nearest=False,\
-                      get_nearest_t=False, log_interp=True):
+
+  def return_spectrum(self,  Te, kappa, teunit='keV',\
+                      log_interp=True):
     """
     Get the spectrum at an exact temperature.
     Interpolates between 2 neighbouring spectra
@@ -475,25 +443,21 @@ class KappaSession(spectrum.CIESession):
     ----------
     Te : float
       Temperature in keV or K
+    kappa : float
+      Non Maxwellian kappa parameter. Must be > 1.5.
     teunit : {'keV' , 'K'}
       Units of te (kev or K, default keV)
-    raw : bool
-      If set, return the spectrum without response applied. Default False.
-    nearest : bool
-      If set, return the spectrum from the nearest tabulated temperature
-      in the file, without interpolation
-    get_nearest_t : bool
-      If set, and `nearest` set, return the nearest tabulated temperature
-      as well as the spectrum.
+    log_interp : bool
+      Interpolate between temperature on a log-log scale (default).
+      Otherwise linear
+
+
 
     Returns
     -------
     spectrum : array(float)
       The spectrum in photons cm^5 s^-1 bin^-1, with the response, or
       photons cm^3 s^-1 bin^-1 if raw is set.
-    nearest_T : float, optional
-      If `nearest` is set, return the actual temperature this corresponds to.
-      Units are same as `teunit`
     """
 
     # Check that there is a response set
@@ -507,6 +471,12 @@ class KappaSession(spectrum.CIESession):
 
     self.spectra.ebins = self.specbins
     self.spectra.ebins_checksum=hashlib.md5(self.spectra.ebins).hexdigest()
+
+    self.spectra.dolines = self.dolines
+    self.spectra.dopseudo = self.dopseudo
+    self.spectra.docont = self.docont
+
+
     s= self.spectra.return_spectrum(Te, kappa, teunit=teunit, elements = el_list, \
                                     abundances=ab, log_interp=True,\
                                     broaden_object=self.cdf)
@@ -539,7 +509,7 @@ class KappaSession(spectrum.CIESession):
 
 
 
-class KappaSpectrum(spectrum._CIESpectrum):
+class _KappaSpectrum(spectrum._NEISpectrum):
   """
   A class holding the emissivity data for NEI emission, and returning
   spectra
@@ -550,10 +520,12 @@ class KappaSpectrum(spectrum._CIESpectrum):
     The line emissivity data file (either name or already open)
   cocofile : string or HDUList, optional
     The continuum emissivity data file (either name or already open)
+  hsdatafile : string
+    Name of FITS file with the H&S coefficient data.
+  ionrecdatafile : string
+    Name of FITS file with the abbreviated ionization and recombination coefficient data.
   elements : arraylike(int), optional
     The atomic number of elements to include (default all)
-  abundset : string
-    The abundance set to use. Default AG89.
 
   Attributes
   ----------
@@ -589,11 +561,24 @@ class KappaSpectrum(spectrum._CIESpectrum):
                                 (linedata[0].header['CHECKSUM'],\
                                  cocodata[0].header['CHECKSUM']))
 
-
+    havepicklefile = False
     if os.path.isfile(picklefname):
-      self.spectra = pickle.load(open(picklefname,'rb'))
-      self.kTlist = self.spectra['kTlist']
+      havepicklefile = True
+
+    if havepicklefile:
+      try:
+        self.spectra = pickle.load(open(picklefname,'rb'))
+        self.kTlist = self.spectra['kTlist']
+      except AttributeError:
+        havepicklefile=False
+        print("pre-stored data in %s is out of date. This can be caused by updates to the data "%(picklefname)+
+              "or, more likely, changes to pyatomdb. Regenerating...")
     else:
+        # delete the old file
+        if os.path.isfile(picklefname):
+          os.remove(picklefname)
+
+    if not havepicklefile:
       self.spectra={}
       self.kTlist = numpy.array(linedata[1].data['kT'].data)
       self.spectra['kTlist'] = numpy.array(linedata[1].data['kT'].data)
@@ -620,11 +605,13 @@ class KappaSpectrum(spectrum._CIESpectrum):
 
             if len(ccdat)==0:
               ccdat = [False]
-            self.spectra[ihdu][Z][z1]=spectrum._ElementSpectrum(ldat[isgood],\
+            self.spectra[ihdu][Z][z1]=_ElementSpectrum(ldat[isgood],\
                                                   ccdat[0], Z, z1_drv=z1)
 
 
       pickle.dump(self.spectra, open(picklefname,'wb'))
+
+
     self.logkTlist=numpy.log(self.kTlist)
 
     # now repeat for hahn savin data
@@ -635,7 +622,7 @@ class KappaSpectrum(spectrum._CIESpectrum):
 
 
 
-  def calc_ionrec_rate(self, tkappa, ckappa, elements):
+  def _calc_ionrec_rate(self, tkappa, ckappa, elements):
     """
     Calculate the ionization and recombination rates for a kappa
     distribution, by summing maxwellians
@@ -671,44 +658,44 @@ class KappaSpectrum(spectrum._CIESpectrum):
 
 
 
-  def return_oneT_spectrum(self, Te, Z, z1, epslimit, teunit='keV', log_interp=True,\
-                           broaden_object=False, ikT=False, f=False):
-    """
-    return a single element, single ion, spectrum, interpolating
-    appropriately between neighboring temperature bins
+  # def return_oneT_spectrum(self, Te, Z, z1, epslimit, teunit='keV', log_interp=True,\
+                           # broaden_object=False, ikT=False, f=False):
+    # """
+    # return a single element, single ion, spectrum, interpolating
+    # appropriately between neighboring temperature bins
 
-    """
-    T = util.convert_temp(Te, teunit, 'K')
-    kT = util.convert_temp(Te, teunit, 'keV')
-
-
-    # Recalc fractions if required
-    if (type(ikT)==bool) | (type(f)==bool):
-      ikT, f = self.get_nearest_Tindex(kT, teunit='keV',  log_interp=log_interp)
+    # """
+    # T = util.convert_temp(Te, teunit, 'K')
+    # kT = util.convert_temp(Te, teunit, 'keV')
 
 
-    # ok, get the spectra
-    stot=0.0
-    for i in range(len(ikT)):
+    # # Recalc fractions if required
+    # if (type(ikT)==bool) | (type(f)==bool):
+      # ikT, f = self.get_nearest_Tindex(kT, teunit='keV',  log_interp=log_interp)
 
-      # get the spectrum
-      sss = self.spectra[ikT[i]][Z][z1].return_spectrum(self.ebins,\
-                                   kT,\
-                                   ebins_checksum = self.ebins_checksum,\
-                                   thermal_broadening = self.thermal_broadening,\
-                                   broaden_limit = epslimit,\
-                                   velocity_broadening = self.velocity_broadening,\
-                                   broaden_object=broaden_object)
-      # add it appropriately
-      if log_interp:
-        stot += numpy.log(sss+const.MINEPSOFFSET)*f[i]
-      else:
-        stot +=sss*f[i]
-    # now handle the sum
 
-    stot = numpy.exp(stot)-const.MINEPSOFFSET*len(f)
-    stot[stot<0] = 0.0
-    return stot
+    # # ok, get the spectra
+    # stot=0.0
+    # for i in range(len(ikT)):
+
+      # # get the spectrum
+      # sss = self.spectra[ikT[i]][Z][z1].return_spectrum(self.ebins,\
+                                   # kT,\
+                                   # ebins_checksum = self.ebins_checksum,\
+                                   # thermal_broadening = self.thermal_broadening,\
+                                   # broaden_limit = epslimit,\
+                                   # velocity_broadening = self.velocity_broadening,\
+                                   # broaden_object=broaden_object)
+      # # add it appropriately
+      # if log_interp:
+        # stot += numpy.log(sss+const.MINEPSOFFSET)*f[i]
+      # else:
+        # stot +=sss*f[i]
+    # # now handle the sum
+
+    # stot = numpy.exp(stot)-const.MINEPSOFFSET*len(f)
+    # stot[stot<0] = 0.0
+    # return stot
 
 
 
@@ -725,10 +712,11 @@ class KappaSpectrum(spectrum._CIESpectrum):
     ----------
     Te : float
       Electron temperature (default, keV)
-    tau : float
-      ionization timescale, ne * t (cm^-3 s).
+    kappa : float
+       kappa coefficient (>1.5)
     teunit : string
       Units of kT (keV by default, K also allowed)
+    FIXME
     nearest : bool
       If True, return spectrum for the nearest temperature index.
       If False, use the weighted average of the (log of) the 2 nearest indexes.
@@ -749,6 +737,10 @@ class KappaSpectrum(spectrum._CIESpectrum):
     # find the correct coefficients here
     tkappa_all, ckappa_all = self.hsdata.get_coeffts(kappa, T)
 
+
+    #ionrate, recrate = self.calc_ionrec_rate(tkappa_all, ckappa_all, elements)
+    self._calc_ionbal(tkappa_all, ckappa_all, elements)
+
     # filter out of range ones
     ckappa = ckappa_all[(tkappa_all >= 1e4) & (tkappa_all <= 1e9)]
     if len(ckappa) < len(tkappa_all):
@@ -767,60 +759,74 @@ class KappaSpectrum(spectrum._CIESpectrum):
       for Z in elements:
         abundances[Z] = 1.0
 
-    s = 0.0
-    #ionrate, recrate = self.calc_ionrec_rate(tkappa_all, ckappa_all, elements)
-    self.calc_ionbal(tkappa_all, ckappa_all, elements)
 
-    for Z in elements:
-      abund = abundances[Z]
-      if abund > 0:
+    stot = 0.0
+
+
+    for ik, tk in enumerate(tkappa):
+      ikT, f = self.get_nearest_Tindex(tk, teunit='K',  log_interp=log_interp)
+
+      s={}
+      s[0] = 0.0
+      s[1] = 0.0
+
+
+      for Z in elements:
+        abund = abundances[Z]
+        if abund > 0:
 
         # solve the ionization balance
      #   self.ionbal[Z] = apec.solve_ionbal(ionrate[Z], recrate[Z])
-        s1 = 0.0
-        ionfrac = self.ionbal[Z]
+          ionfrac = self.ionbal[Z]
 
-        for ik, tk in enumerate(tkappa):
-          ikT, f = self.get_nearest_Tindex(tk, teunit='K',  log_interp=True)
-          s1=0.0
           for z1 in range(1, Z+2):
+
             if ionfrac[z1-1]>1e-10:
 
               # calculate minimum emissivitiy to broaden, accounting for ion
               # and element abundance.
               epslimit =  self.broaden_limit/(abund*ionfrac[z1-1])
 
-              sss  = self.return_oneT_spectrum(kT, Z, z1, epslimit, teunit='keV', log_interp=log_interp,\
-                                       broaden_object=broaden_object, ikT=ikT, f=f)
+              for i, iikT in enumerate(ikT):
 
-              sss*=abund*ionfrac[z1-1]
+                s[i] += self.spectra[ikT[0]][Z][z1].return_spectrum(self.ebins,\
+                                  kT,\
+                                  ebins_checksum = self.ebins_checksum,\
+                                  thermal_broadening = self.thermal_broadening,\
+                                  broaden_limit = epslimit,\
+                                  velocity_broadening = self.velocity_broadening,\
+                                  broaden_object=broaden_object,\
+                                  dolines=self.dolines,\
+                                  dopseudo=self.dopseudo,\
+                                  docont=self.docont,\
+                                  ) *\
+                                  ionfrac[z1-1] * abund
 
-              s1+=sss
+      # merge the spectra
+      smerge = self._merge_spectra_temperatures(f, s[0], s[1], log_interp)
+      stot += smerge*ckappa[ik]
 
-          s+=s1*ckappa[ik]
-    return s
+    return stot
 
-  def calc_ionbal(self, tkappa_all, ckappa_all, elements):
-    ionrate, recrate = self.calc_ionrec_rate(tkappa_all, ckappa_all, elements)
-
+  def _calc_ionbal(self, tkappa_all, ckappa_all, elements):
+    ionrate, recrate = self._calc_ionrec_rate(tkappa_all, ckappa_all, elements)
     self.ionbal={}
     for Z in elements:
       # solve the ionization balance
       self.ionbal[Z] = apec.solve_ionbal(ionrate[Z], recrate[Z])
 
-  def return_line_emissivity(self, Te, tau, Z, z1, up, lo, specunit='A',
+  def return_line_emissivity(self, Te, kappa, Z, z1, up, lo, specunit='A',
                              teunit='keV', abundance=1.0,
-                             log_interp = True, init_pop = 'ionizing'):
+                             log_interp = True):
     """
     Return the emissivity of a line at kT, tau. Assumes ionization from neutral for now
-
 
     Parameters
     ----------
     Te : float
       Temperature in keV or K
-    tau : float
-      ionization timescale, ne * t (cm^-3 s).
+    kappa : float
+      Non Maxwellian kappa parameter. Must be > 1.5.
     Z : int
       nuclear charge of element
     z1 : int
@@ -835,13 +841,9 @@ class KappaSpectrum(spectrum._CIESpectrum):
       Units of Telist (kev or K, default keV)
     abundance : float
       Abundance to multiply the emissivity by
-
-    init_pop : string or float
-      If string:
-        if 'ionizing' : all ionizing from neutral (so [1,0,0,0...])
-        if 'recombining': all recombining from ionized (so[...0,0,1])
-        if array of length (Z+1) : the acutal fractional populations
-        if single float : the temperature (same units as Te)
+    log_interp : bool
+      Interpolate between temperature on a log-log scale (default).
+      Otherwise linear
 
     Returns
     -------
@@ -854,84 +856,61 @@ class KappaSpectrum(spectrum._CIESpectrum):
     import collections
 
     kT = util.convert_temp(Te, teunit, 'keV')
+    T = util.convert_temp(Te, teunit, 'K')
 
-    ikT, f = self.get_nearest_Tindex(kT, \
-                                     teunit='keV', \
-                                     nearest=False, \
-                                     log_interp=log_interp)
-    #ikT has the 2 nearest temperature indexes
-    # f has the fraction for each
+    # find the correct coefficients here
+    tkappa_all, ckappa_all = self.hsdata.get_coeffts(kappa, T)
+    self._calc_ionbal(tkappa_all, ckappa_all, [Z])
+    # filter out of range ones
+    ckappa = ckappa_all[(tkappa_all >= 1e4) & (tkappa_all <= 1e9)]
+    if len(ckappa) < len(tkappa_all):
+      print("Note: only using %i of %i requested Maxwellian components as they are inside the 10^4 to 10^9K range"%(len(ckappa), len(tkappa_all)))
 
-    if type(init_pop) == str:
-      if init_pop == 'ionizing':
-        # everything neutral
-        ipop = numpy.zeros(Z+1)
-        ipop[0] = 1.0
-      elif init_pop == 'recombining':
-        # everything ionizing
-        ipop = numpy.zeros(Z+1)
-        ipop[-1] = 1.0
-    else:
-      if isinstance(init_pop, (collections.Sequence, numpy.ndarray)):
-        if len(init_pop)==Z+1:
-          ipop = init_pop
-        else:
-          pass
-      else:
-        kT_in = util.convert_temp(init_pop, teunit, 'keV')
-        ipop = apec.solve_ionbal_eigen(Z, \
-                                      kT_in, \
-                                      teunit='keV', \
-                                      datacache=self.datacache)
+    tkappa = tkappa_all[(tkappa_all >= 1e4) & (tkappa_all <= 1e9)]
 
-
-    ionfrac = apec.solve_ionbal_eigen(Z, \
-                                      kT, \
-                                      init_pop=ipop, \
-                                      tau=tau, \
-                                      teunit='keV', \
-                                      datacache=self.datacache)
 
     eps = 0.0
     lam = 0.0
 
+    ionfrac = self.ionbal[Z]
 
+    for ik, tk in enumerate(tkappa):
+      ikT, f = self.get_nearest_Tindex(tk, teunit='K',  log_interp=log_interp)
       # find lines which match
-    for z1_drv in range(1,Z+2):
+      eps_tmp = 0.0
+      for z1_drv in range(1,Z+2):
       # ions which don't exist get skipped
-      if ionfrac[z1_drv-1] <= 1e-10: continue
-      eps_in = numpy.zeros(len(ikT))
+        if ionfrac[z1_drv-1] <= 1e-10: continue
+        eps_in = numpy.zeros(len(ikT))
 
-      for i in range(len(ikT)):
-        iikT =ikT[i]
-
-        llist = self.spectra[iikT][Z][z1_drv].return_linematch(Z,z1,up,lo)
-
-        for line in llist:
-          # add emissivity
-          eps_in[i] += line['Epsilon']
-          lam = line['Lambda']
-
+        for i, iikT in enumerate(ikT):
+          llist = self.spectra[iikT][Z][z1_drv].return_linematch(Z,z1,up,lo)
+          for line in llist:
+            # add emissivity
+            eps_in[i] += line['Epsilon']*ionfrac[z1_drv-1]
+            lam = line['Lambda']
+        # now merge
+        eps_tmp += eps_in
+      eps_x = 0.0
       if log_interp:
-        eps_out = 0.0
         for i in range(len(ikT)):
-          eps_out += f[i]*numpy.log(eps_in[i]+const.MINEPSOFFSET)
-        eps += numpy.exp(eps_out-const.MINEPSOFFSET)*abundance * ionfrac[z1_drv-1]
+          eps_x += f[i]*numpy.log(eps_tmp[i]+const.MINEPSOFFSET)
+        eps_tmp = (numpy.exp(eps_x)-const.MINEPSOFFSET)*abundance *ckappa[ik]
       else:
-        eps_out = 0.0
         for i in range(len(ikT)):
-          eps_out += f[i]*eps_in[i]
-        eps += eps_out*abundance * ionfrac[z1_drv-1]
+          eps_x += f[i]*eps_tmp[i]
+        eps_tmp = eps_x*abundance *ckappa[ik]
 
+      eps += eps_tmp
 
     if specunit == 'keV':
       lam = const.HC_IN_KEV_A/lam
     return eps, lam
 
-  def return_linelist(self,  Te, tau, Te_init=False,
-                      teunit='keV', nearest = False, specrange=False,
-                      specunit='A', elements=False, abundances=False,\
-                      init_pop = 'ionizing', log_interp=True):
+  def return_linelist(self,  Te, kappa,\
+                      teunit='keV', nearest=False, specrange=False,\
+                      specunit='A', elements=False, abundance=False,\
+                      log_interp=True):
 
     """
     Return the linelist of the element
@@ -941,6 +920,8 @@ class KappaSpectrum(spectrum._CIESpectrum):
 
     Te : float
       Electron temperature (default, keV)
+    kappa : float
+      Non Maxwellian kappa parameter. Must be > 1.5.
     teunit : string
       Units of kT (keV by default, K also allowed)
     nearest : bool
@@ -951,194 +932,102 @@ class KappaSpectrum(spectrum._CIESpectrum):
       Minimum and maximum values for interval in which to search
     specunit : {'Ansgtrom','keV'}
       Units for specrange (default A)
-
+    elements : iterable of int
+      Elements to include, listed by atomic number. if not set, include all.
+    abundance : dict(float)
+      The abundances of each element, e.g. abund[6]=1.1 means multiply carbon
+      abundance by 1.1.
+    log_interp : bool
+      Interpolate between temperature on a log-log scale (default).
+      Otherwise linear
 
     """
     # get kT in keV
+    T = util.convert_temp(Te, teunit, 'K')
     kT = util.convert_temp(Te, teunit, 'keV')
 
+    # find the correct coefficients here
+    tkappa_all, ckappa_all = self.hsdata.get_coeffts(kappa, T)
 
-    ikT, f = self.get_nearest_Tindex(kT, teunit='keV', nearest=nearest)
+    # filter out of range ones
+    ckappa = ckappa_all[(tkappa_all >= 1e4) & (tkappa_all <= 1e9)]
+    if len(ckappa) < len(tkappa_all):
+      print("Note: only using %i of %i requested Maxwellian components as they are inside the 10^4 to 10^9K range"%(len(ckappa), len(tkappa_all)))
 
-    if abundances == False:
-      abundances = {}
+    tkappa = tkappa_all[(tkappa_all >= 1e4) & (tkappa_all <= 1e9)]
+
+    # check the params:
+    if elements==False:
+      elements=range(1,const.MAXZ_NEI+1)
+
+    if abundance == False:
+      abundance = {}
       for Z in elements:
-        abundances[Z] = 1.0
+        abundance[Z] = 1.0
 
-    linelist = False
+    self._calc_ionbal(tkappa, ckappa, elements)
 
+    linelist = numpy.zeros(0, dtype=apec.generate_datatypes('linelist_cie_spectrum'))
 
-    # Cycle through each element
+    # set up arrays to store by element lines
+    s={}
     for Z in elements:
+      s[Z] = numpy.zeros(0, dtype=apec.generate_datatypes('linelist_cie_spectrum'))
 
-
-      abund = abundances[Z]
-
-      # Skip if abundance is low
-      if abund > 0:
-        elemlinelist = {}
-
-
-        # Get initial ion population for element
-        if type(init_pop) == str:
-          if init_pop == 'ionizing':
-            # everything neutral
-            ipop = numpy.zeros(Z+1)
-            ipop[0] = 1.0
-          elif init_pop == 'recombining':
-            # everything ionizing
-            ipop = numpy.zeros(Z+1)
-            ipop[-1] = 1.0
-        else:
-          if isinstance(init_pop, (collections.Sequence, numpy.ndarray)):
-            if len(init_pop)==Z+1:
-              ipop = init_pop
-            else:
-              pass
-          else:
-            kT_in = util.convert_temp(init_pop, teunit, 'keV')
-            ipop = apec.solve_ionbal_eigen(Z, \
-                                          kT_in, \
-                                          teunit='keV', \
-                                          datacache=self.datacache)
+    for ik, tk in enumerate(tkappa):
+      ikT, f = self.get_nearest_Tindex(tk, teunit='K',  log_interp=log_interp)
 
 
 
+      for Z in elements:
+        abund = abundance[Z]
+        stmp={}
+        stmp['Z'] = {}
+        stmp['Z'][0] = numpy.zeros(0, dtype=apec.generate_datatypes('linelist_cie_spectrum'))
+        stmp['Z'][1] = numpy.zeros(0, dtype=apec.generate_datatypes('linelist_cie_spectrum'))
 
-        # calculate final ion population for element
-        ionfrac = apec.solve_ionbal_eigen(Z, \
-                                          kT, \
-                                          init_pop=ipop, \
-                                          tau=tau, \
-                                          teunit='keV', \
-                                          datacache=self.datacache)
+        if abund > 0:
 
-        # go through the 2 nearest emissivity temperatures
-        for i in range(len(ikT)):
-          iikT = ikT[i]
-          elemlinelist[iikT] = False
+        # solve the ionization balance
+     #   self.ionbal[Z] = apec.solve_ionbal(ionrate[Z], recrate[Z])
+          ionfrac = self.ionbal[Z]
 
-          # go ion by ion
           for z1_drv in range(1, Z+2):
 
-            # skip if ion fraction is low
-            if ionfrac[z1_drv-1] < 1e-10: continue
+            if ionfrac[z1_drv-1]>1e-10:
 
-            # list all the lines for the ion_drv
-            ss = self.spectra[ikT[i]][Z][z1_drv].return_linelist(specrange,\
-                                    teunit='keV', specunit=specunit)
-
-            # if 1 or more lines found, do something
-            if len(ss) > 0:
-
-              # adjust line emissivty by abundance and ion fraction
-              ss['Epsilon']*=abund*ionfrac[z1_drv-1]
-
-              # if this is the first set of lines, add them
-              if elemlinelist[iikT]==False:
-                elemlinelist[iikT] = ss
-              else:
-              # otherwise, merge them in. No separation by driving ion.
-                isnew = numpy.zeros(len(ss), dtype=bool)
-
-                for inew, new in enumerate(ss):
-                  imatch = numpy.where((new['Element']==elemlinelist[iikT]['Element']) &\
-                                       (new['Ion']==elemlinelist[iikT]['Ion']) &\
-                                       (new['UpperLev']==elemlinelist[iikT]['UpperLev']) &\
-                                       (new['LowerLev']==elemlinelist[iikT]['LowerLev']))[0]
-                  if len(imatch)==1:
-                    # if the same line already exists, add to its flux
-                    elemlinelist[iikT][imatch[0]]['Epsilon']+=new['Epsilon']
-                  else:
-                    # otherwise, declare it as a new line, ready to append
-                    isnew[inew]=True
-
-                s = sum(isnew)
-                if s > 0:
-                  # append any new lines to the end of elemlinelist
-                  elemlinelist[iikT] = numpy.append(elemlinelist[iikT], ss[isnew])
-
-          # At this point, elemlinelist[ikT] contains the flux in each line for a single ikT.
-          # We need to adjust these, and then ultimately merge them with the next ikT with
-          # a suitbale multiplicative factor.
-
-          # OK, so now multiply all the line emissivities by the appropriate factor
-          if elemlinelist[iikT] == False: continue
-
-          if log_interp:
-            elemlinelist[iikT]['Epsilon'] = f[i] * numpy.log(elemlinelist[iikT]['Epsilon']+ const.MINEPSOFFSET)
-
-          else:
-            elemlinelist[iikT]['Epsilon'] = f[i] * elemlinelist[iikT]['Epsilon']
-
-        # now merge these 2 temperature results
-        ikTlist = ikT*1
-        ikTkeep = numpy.ones(len(ikTlist), dtype=bool)
-        for i,iikT in enumerate(ikT):
-          if elemlinelist[iikT]==False:
-            ikTkeep[i] = False
-
-        if sum(ikTkeep)==0: continue
-
-        if sum(ikTkeep)==1:
-          ikTlist = ikTlist[ikTkeep]
-
-        if len(ikTlist) > 1:
-          # find matches for each line
-          iikT = ikTlist[1]
-          hasmatch = numpy.zeros(len(elemlinelist[iikT]), dtype=bool)
-
-          for iline, line in enumerate(elemlinelist[iikT]):
-
-            imatch = numpy.where((elemlinelist[ikTlist[0]]['Element']==line['Element']) &\
-                                 (elemlinelist[ikTlist[0]]['Ion']==line['Ion']) &\
-                                 (elemlinelist[ikTlist[0]]['UpperLev']==line['UpperLev']) &\
-                                 (elemlinelist[ikTlist[0]]['LowerLev']==line['LowerLev']))[0]
-            if len(imatch)==0:
-              line['Epsilon'] = numpy.exp(line['Epsilon']-const.MINEPSOFFSET)
-            else:
-              hasmatch[iline] = True
-              itmp = imatch[0]
-              elemlinelist[ikTlist[0]][itmp]['Epsilon'] += line['Epsilon']
-
-          if log_interp:
-            elemlinelist[ikTlist[0]]['Epsilon'] = numpy.exp(elemlinelist[ikTlist[0]]['Epsilon']- const.MINEPSOFFSET)
-
-          # now append the unmatched
-          elemlinelist = numpy.append(elemlinelist[ikTlist[0]], elemlinelist[ikTlist[1]][~hasmatch])
-
-        else:
-          if log_interp:
-            elemlinelist = numpy.exp(elemlinelist[ikTlist[0]]['Epsilon']- const.MINEPSOFFSET)
+              # calculate minimum emissivitiy to broaden, accounting for ion
+              # and element abundance.
+              epslimit =  self.broaden_limit/(abund*ionfrac[z1_drv-1])
 
 
-        if linelist == False:
-          linelist = numpy.zeros(0, dtype=elemlinelist.dtype)
+              llist={}
+              for i, iikT in enumerate(ikT):
+                llist[i] = self.spectra[iikT][Z][z1_drv].return_linelist(specrange, specunit=specunit)
 
-        linelist=numpy.append(linelist, elemlinelist)
+                llist[i]['Epsilon']*= ionfrac[z1_drv-1] * abund
 
+                tmpl = numpy.zeros(len(llist[i]), dtype=apec.generate_datatypes('linelist_cie_spectrum'))
+                for key in tmpl.dtype.names:
+                  tmpl[key] = llist[i][key]
+                stmp['Z'][i] = numpy.append(stmp['Z'][i], tmpl)
 
-    return linelist
+        #merge all the lines of the element at each temperature
+        stmp['Z']['sum']=self._merge_linelists_temperatures(f, stmp['Z'][0], stmp['Z'][1], \
+                                                     log_interp, \
+                                                     by_ion_drv=False)
+        # normalize for kappa C fraction
+        stmp['Z']['sum']['Epsilon'] *= ckappa[ik]
 
+        # append to the overall linelist for the element
+        s[Z]=numpy.append(s[Z], stmp['Z']['sum'])
 
+    # create a return linelist - all elements, removing duplicates
+    s_out = numpy.zeros(0, dtype=apec.generate_datatypes('linelist_cie_spectrum'))
+    for Z in elements:
+      s_out=numpy.append(s_out, self._merge_linelist_duplicates(s[Z], by_ion_drv=False))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return s_out
 
 MIN_IONBAL = 1e-10
 
@@ -1555,710 +1444,3 @@ class ir_data():
 #-------------------------------------------------------------------------------
 
 
-
-# class kappamodel():
-  # """
-  # Class for all things kappa
-  # """
-
-  # def __init__(self, elements=[1,2,6,7,8,10,12,13,14,16,18,20,26,28],\
-               # linefile = "$ATOMDB/apec_nei_line.fits",\
-               # compfile = "$ATOMDB/apec_nei_comp.fits"):
-
-    # # load up the kappa coefficients
-    # self.hs_data = hs_data()
-    # self.elements = elements
-    # self.abund = {}
-    # for Z in self.elements:
-      # self.abund[Z] = 1.0
-    # self.ionrec_data = irdata(elements = self.elements)
-
-    # # for spectra
-    # self.ebins = False
-    # self.ebins_checksum = False
-    # self.spectra = {}
-
-    # self.linedata = pyatomdb.pyfits.open(os.path.expandvars(linefile))
-    # self.compdata = pyatomdb.pyfits.open(os.path.expandvars(compfile))
-
-
-    # self.spectra['temperatures'] = self.linedata[1].data['kT']/const.KBOLTZ
-    # for Z in self.elements:
-      # self.spectra[Z] = {}
-      # #for z1 in range(1, Z+2):
-      # #  self.spectra[Z][z1] = IonSpectrum(Z, z1, self.spectra['temperatures'], self.linedata, self.compdata)
-    # print("Kappa model ready for use. Note that the first time a spectrum "+\
-          # "is calculated it can take up to a  minute to finish. It gets much "+\
-          # "faster after that, I promise.")
-
-
-  # def get_kappa_coeffts(self, kappa, T):
-    # """
-    # Return the kappa coefficients and temperatures at desired temperature
-
-    # PARAMETERS
-    # ----------
-    # kappa : float
-      # kappa coefficient (>1.5)
-    # T : float
-      # temperature (K)
-
-    # RETURNS
-    # -------
-    # Tkappa : array(float)
-      # temperatures required for kappa calculation (K)
-    # ckappa : array(float)
-      # coefficients at these temperatures
-    # """
-    # Tkappa, ckappa = self.hs_data.get_coeffts(kappa,T)
-
-    # return(Tkappa, ckappa)
-
-  # def calc_ionrec_rate(self, kappa, T):
-    # """
-    # Calculate the ionization and recombination rates for a kappa
-    # distribution, by summing maxwellians
-
-    # PARAMETERS
-    # ----------
-    # kappa : float
-      # kappa coefficient (>1.5)
-    # T : float
-      # temperature (K)
-
-    # RETURNS
-    # -------
-    # ionrate : dict
-      # e.g. ionrate[16] is the ionization rate coefft for sulphur 1 through 17, in cm^3 s-1
-    # recrate : dict
-      # e.g. recrate[16] is the recombiation rate coefft for sulphur 1 through 17, in cm^3 s-1
-    # """
-
-    # tkappa, ckappa = self.get_kappa_coeffts( kappa, T)
-    # # filter OOB kappa:
-# #    ckappa = ckappa[ (tkappa >=1e4) & (tkappa <= 1e9)]
-# #    tkappa = tkappa[ (tkappa >=1e4) & (tkappa <= 1e9)]
-
-    # ircoeffts = self.ionrec_data.get_ir_rate(tkappa)
-
-
-    # ionrate = {}
-    # recrate = {}
-
-
-    # for Z in self.elements:
-      # ionrate[Z] = numpy.zeros(Z)
-      # recrate[Z] = numpy.zeros(Z)
-      # for z1 in range(1,Z+1):
-        # ionrate[Z][z1-1]=sum( ircoeffts[Z]['ion'][z1-1,:]*ckappa)
-        # recrate[Z][z1-1]=sum( ircoeffts[Z]['rec'][z1-1,:]*ckappa)
-
-    # self.tkappa = tkappa
-    # self.ckappa = ckappa
-    # return ionrate, recrate
-
-
-  # def calc_ionbal(self, kappa, T, elements):
-    # """
-    # Calculate the ionization balance for a kappa distribution by summing
-    # Maxwellians
-
-    # PARAMETERS
-    # ----------
-    # kappa : float
-      # kappa coefficient (>1.5)
-    # T : float
-      # temperature (K)
-
-    # RETURNS
-    # -------
-    # ionbal : dict
-      # e.g. ionbal[16] is a 17 element array with the fractional abundance of each ion of S, starting with neutral
-    # """
-
-    # ionrate, recrate = self.calc_ionrec_rate(kappa, T, elements)
-
-
-    # ionbal = {}
-    # for Z in elements:
-      # ionbal[Z] = pyatomdb.apec.solve_ionbal(ionrate[Z], recrate[Z])
-    # self.ionbal = ionbal
-
-
-    # return ionbal
-
-
-  # def set_ebins(self, ebins, ebins_checksum = False):
-    # """
-    # Set the energy bins for the spectrum being returned.
-
-    # PARAMETERS
-    # ----------
-    # ebins : array(float)
-      # Energy bin edges (keV)
-    # ebins_checksum : string, optional
-      # The hex digest of the md5 sum of ebins. Used to check for changes.
-    # """
-
-    # if ebins_checksum == False:
-      # ebins_checksum = hashlib.md5(ebins).hexdigest()
-
-    # self.ebins = ebins
-
-    # if ebins_checksum != self.ebins_checksum:
-      # self.ebins_checksum = ebins_checksum
-      # for Z in self.elements:
-        # #if Z=='temperatures': continue
-
-        # for z1 in self.spectra[Z].keys():
-
-
-          # self.spectra[Z][z1].set_ebins(self.ebins, ebins_checksum=self.ebins_checksum)
-
-  # def calc_spectrum(self, kappa, T, ebins, abundset = 'angr', abund = 1.0, \
-                    # elements=[1,2,6,7,8,10,12,13,14,16,18,20,26,28]):
-    # """
-    # Calculate a spectrum
-
-    # PARAMETERS
-    # ----------
-    # kappa : float
-      # kappa coefficient (>=2)
-    # T : float
-      # electron temperature (K)
-    # ebins : array(float)
-      # energy bins edges for spectrum (keV)
-    # abundset : str
-      # Abundance set (4 letter string from XSPEC)
-    # abund : float of dict of floats
-      # Abundance to apply for each element
-
-    # RETURNS
-    # -------
-    # spectum : array(float)
-      # resulting spectrum in photons bin-1 s-1 cm^3
-    # """
-
-    # # first, calculate the ionization balance
-    # ionbal = self.calc_ionbal(kappa, T, elements)
-
-    # # set abundances
-    # if type(abund)==float:
-      # for Z in self.elements:
-        # self.abund[Z] = abund *modelabund(Z, abundset)
-    # elif type(abund)==dict:
-      # for Z in abund.keys():
-        # self.abund[Z] = abund[Z]*modelabund(Z, abundset)
-
-    # # get the kapp coefficients
-    # tkappa, ckappa = self.get_kappa_coeffts( kappa, T)
-
-    # # filter out of range ones
-    # ckappa = ckappa[(tkappa >= 1e4) & (tkappa <= 1e9)]
-    # tkappa = tkappa[(tkappa >= 1e4) & (tkappa <= 1e9)]
-
-    # # for each temperature, calculate a spectrum
-    # spec = numpy.zeros(len(ebins)-1)
-
-    # for ik, tk in enumerate(tkappa):
-      # ck=ckappa[ik]
-      # for Z in ionbal.keys():
-        # z1list = numpy.where(ionbal[Z] > MIN_IONBAL)[0]+1
-        # if not Z in self.spectra.keys():
-            # self.spectra[Z] = {}
-        # for z1 in z1list:
-          # if not z1 in self.spectra[Z].keys():
-
-            # self.spectra[Z][z1] = IonSpectrum(Z, z1, self.spectra['temperatures'], self.linedata, self.compdata)
-
-          # s = self.spectra[Z][z1].return_spectrum(tk, ebins, \
-                                          # ebins_checksum = hashlib.md5(ebins).hexdigest(),\
-                                          # scalefactor = self.abund[Z]*ionbal[Z][z1-1]*ck)
-
-          # spec+= s * ck * self.abund[Z] * ionbal[Z][z1-1]
-
-    # return spec
-
-
-
-
-# class IonSpectrum():
-  # """
-  # Holds the details of the ion at all temperatures
-  # """
-
-  # def __init__(self, Z, z1, Tlist, linedata, cocodata):
-    # self.Tlist = Tlist
-    # self.Z = Z
-    # self.z1 = z1
-    # self.ionspectrumlist = {}
-    # for iT in range(len(Tlist)):
-      # self.ionspectrumlist[iT] = IonSpectrum_onetemp(Z, z1, self.Tlist[iT], linedata[iT+2].data, cocodata[iT+2].data)
-
-
-
-
-  # def return_spectrum(self, T, ebins, ebins_checksum=False, scalefactor=1.0,\
-                      # temperature=False, broadenlimit=1e-18):
-
-    # """
-    # Return the specturm at this temperatures
-    # """
-
-    # # Find the temperature I care about
-    # ilo = max(numpy.where(self.Tlist < T)[0])
-    # ihi = ilo + 1
-
-
-    # r1 = 1- (T-self.Tlist[ilo])/(self.Tlist[ihi]-self.Tlist[ilo])
-    # r2 = 1- r1
-
-
-
-    # # great!
-
-    # spec = self.ionspectrumlist[ilo].return_spectrum(ebins,\
-                                                  # ebins_checksum=ebins_checksum, \
-                                                  # scalefactor=1.0,\
-                                                  # temperature=temperature, \
-                                                  # broadenlimit=broadenlimit)*r1
-
-    # spec += self.ionspectrumlist[ihi].return_spectrum(ebins,\
-                                                  # ebins_checksum=ebins_checksum, \
-                                                  # scalefactor=1.0,\
-                                                  # temperature=temperature, \
-                                                  # broadenlimit=broadenlimit)*r2
-
-    # return spec
-
-
-
-
-# class IonSpectrum_onetemp():
-  # """
-  # Holds the spectrum details for the ion at one temperature
-
-  # """
-
-  # def __init__(self, Z, z1, T, linedata, cocodata):
-
-    # # store things
-    # self.Z = Z
-    # self.z1 = z1
-    # self.T = T
-    # lines = linedata[(linedata['Element'] == Z) &
-                    # (linedata['Ion_Drv'] == z1)]
-
-
-    # self.linelist = numpy.zeros(len(lines), dtype=numpy.dtype({'names':['energy','epsilon'],\
-                                                     # 'formats':[float, float]}))
-    # self.linelist['energy'] = const.HC_IN_KEV_A/lines['lambda']
-    # self.linelist['epsilon'] = lines['epsilon']
-
-    # # get the continuum information
-
-
-
-    # c = numpy.where((cocodata['Z']==Z) & (cocodata['rmJ'] == z1))[0]
-    # # set up to store continuum & coco files
-
-
-
-
-    # n =cocodata['N_Cont'][c[0]]
-    # self.cont=Continuum(cocodata['E_Cont'][c[0]][:n],\
-                        # cocodata['Continuum'][c[0]][:n], \
-                        # 'continuum')
-
-    # n =cocodata['N_Pseudo'][c[0]]
-    # self.pseudo=Continuum(cocodata['E_Pseudo'][c[0]][:n],\
-                        # cocodata['Pseudo'][c[0]][:n], \
-                        # 'pseudo')
-
-
-
-    # # store the checksum so we know if we have to recalc later
-    # self.ebins_checksum = False
-
-
-
-
-
-
-  # def return_spectrum(self, ebins, ebins_checksum=False, scalefactor=1.0,\
-                      # temperature=False, broadenlimit=1e-18):
-    # """
-    # Return the spectrum of the ion on the grid ebins
-
-    # PARAMETERS
-    # ----------
-    # ebins : array(float)
-      # energy bins in keV
-    # ebins_checksum : str
-      # checksum for ebins, to compare with earlier versions
-    # scalefactor : float
-      # multiply all emissivities by this before deciding if they are
-      # above or below the broadening threshold
-    # temperature : float
-      # broaden all lines with emissivity*scalefactor > broadenlimit with
-      # Gaussians reflecting this electron temperature (Kelvin)
-    # broadenlimit : float
-      # lines with emissivity > this will be broadened.
-
-    # RETURNS
-    # -------
-    # spectrum : float(array)
-      # emissivity in photons s-1 bin-1. Note scalefactor is  *NOT* applied to this
-    # """
-
-    # if ((ebins_checksum == False ) | \
-        # (ebins_checksum != self.ebins_checksum)):
-      # # need to recalculate the continuum spectrum
-
-      # self.continuum = self.cont.return_spectrum(ebins) +\
-                       # self.pseudo.return_spectrum(ebins)
-
-
-    # # now do the lines!
-    # spec = numpy.zeros(len(ebins)-1)
-
-    # ### I HAVE NOT YET IMPLEMENTED BROADENING
-
-
-# #    if temperature == True:
-# #      # we are doing some broadening
-# #      emiss = self.linelist['epsilon'] * scalefactor
-# #      ibroad = emiss > broadenlimit
-# #      s,z = numpy.histogram(self.linelist['energy'][~ibroad], \
-# #                            bins=ebins, \
-# #                            weights = self.linelist['epsilon'][~ibroad])
-# #      spec += s
-# #
-# #      broadencoefft = temperature *const.ERG_KEV/ pyatomdb.atomic.Z_to_mass(self.Z)* const.AMUKG
-# #      for l in self.linelist[ibroad]:
-# #        # add each line with broadening
-
-
- # #   else:
-    # s,z = numpy.histogram(self.linelist['energy'], \
-                          # bins=ebins, \
-                          # weights = self.linelist['epsilon'])
-    # spec += s
-
-
-    # spec += self.continuum
-
-    # return spec
-
-
-
-# class Continuum():
-  # """
-  # Class for holding a continuum for one ion
-
-  # """
-
-  # def __init__(self, E, C, conttype):
-    # """
-    # E : array(float)
-    # C : array(float)
-    # conttype : string
-      # "psuedo" or "continuum"
-    # """
-
-    # self.E = E
-    # self.C = C
-    # self.conttype = conttype
-
-
-
-  # def return_spectrum(self, ebins):
-    # """
-    # Return the spectrum of the ion on the grid ebins
-
-    # PARAMETERS
-    # ----------
-    # ebins : array(float)
-      # The bin edges, in keV
-
-    # RETURNS
-    # -------
-    # spectrum : array(float)
-      # The emissivity spectrum in ph cm^3 s^-1 bin^-1
-    # """
-
-    # #if ((not(ebins_checksum)) | (ebins_checksum != self.ebins_checksum)):
-    # spec = self.expand_spectrum(ebins)
-    # self.ebins_checksum = hashlib.md5(ebins).hexdigest()
-    # return spec
-
-
-
-
-  # def expand_spectrum(self, eedges):
-
-    # """
-    # Code to expand the compressed continuum onto a series of bins.
-
-    # Parameters
-    # ----------
-    # eedges : float(array)
-      # The bin edges for the spectrum to be calculated on, in units of keV
-
-    # Returns
-    # -------
-    # float(array)
-      # len(eedges)-1 array of continuum emission, in units of \
-      # photons cm^3 s^-1 bin^-1
-    # """
-    # import scipy.integrate
-    # n=len(self.E)
-    # if n==2:
-      # return 0.0
-  # # ok. So. Sort this.
-    # E_all = numpy.append(self.E, eedges)
-    # cont_tmp = numpy.interp(eedges, self.E, self.C)
-    # C_all = numpy.append(self.C, cont_tmp)
-
-    # iord = numpy.argsort(E_all)
-
-  # # order the arrays
-    # E_all = E_all[iord]
-    # C_all = C_all[iord]
-
-    # ihi = numpy.where(iord>=n)[0]
-    # cum_cont = scipy.integrate.cumtrapz(C_all, E_all, initial=0)
-    # C_out = numpy.zeros(len(eedges))
-    # C_out = cum_cont[ihi]
-
-    # cont = C_out[1:]-C_out[:-1]
-    # return cont
-
-
-# def modelabund(Z, abundset):
-  # modelabund={}
-  # modelabund['angr'] = numpy.zeros(31)
-  # modelabund['angr'][1]=1.00e+00
-  # modelabund['angr'][2]=9.77e-02
-  # modelabund['angr'][3]=1.45e-11
-  # modelabund['angr'][4]=1.41e-11
-  # modelabund['angr'][5]=3.98e-10
-  # modelabund['angr'][6]=3.63e-04
-  # modelabund['angr'][7]=1.12e-04
-  # modelabund['angr'][8]=8.51e-04
-  # modelabund['angr'][9]=3.63e-08
-  # modelabund['angr'][10]=1.23e-04
-  # modelabund['angr'][11]=2.14e-06
-  # modelabund['angr'][12]=3.80e-05
-  # modelabund['angr'][13]=2.95e-06
-  # modelabund['angr'][14]=3.55e-05
-  # modelabund['angr'][15]=2.82e-07
-  # modelabund['angr'][16]=1.62e-05
-  # modelabund['angr'][17]=3.16e-07
-  # modelabund['angr'][18]=3.63e-06
-  # modelabund['angr'][19]=1.32e-07
-  # modelabund['angr'][20]=2.29e-06
-  # modelabund['angr'][21]=1.26e-09
-  # modelabund['angr'][22]=9.77e-08
-  # modelabund['angr'][23]=1.00e-08
-  # modelabund['angr'][24]=4.68e-07
-  # modelabund['angr'][25]=2.45e-07
-  # modelabund['angr'][26]=4.68e-05
-  # modelabund['angr'][27]=8.32e-08
-  # modelabund['angr'][28]=1.78e-06
-  # modelabund['angr'][29]=1.62e-08
-  # modelabund['angr'][30]=3.98e-08
-
-  # modelabund['aspl'] = numpy.zeros(31)
-  # modelabund['aspl'][1]= 1.00e+00
-  # modelabund['aspl'][2]= 8.51e-02
-  # modelabund['aspl'][3]= 1.12e-11
-  # modelabund['aspl'][4]= 2.40e-11
-  # modelabund['aspl'][5]= 5.01e-10
-  # modelabund['aspl'][6]= 2.69e-04
-  # modelabund['aspl'][7]= 6.76e-05
-  # modelabund['aspl'][8]= 4.90e-04
-  # modelabund['aspl'][9]= 3.63e-08
-  # modelabund['aspl'][10]=8.51e-05
-  # modelabund['aspl'][11]=1.74e-06
-  # modelabund['aspl'][12]=3.98e-05
-  # modelabund['aspl'][13]=2.82e-06
-  # modelabund['aspl'][14]=3.24e-05
-  # modelabund['aspl'][15]=2.57e-07
-  # modelabund['aspl'][16]=1.32e-05
-  # modelabund['aspl'][17]=3.16e-07
-  # modelabund['aspl'][18]=2.51e-06
-  # modelabund['aspl'][19]=1.07e-07
-  # modelabund['aspl'][20]=2.19e-06
-  # modelabund['aspl'][21]=1.41e-09
-  # modelabund['aspl'][22]=8.91e-08
-  # modelabund['aspl'][23]=8.51e-09
-  # modelabund['aspl'][24]=4.37e-07
-  # modelabund['aspl'][25]=2.69e-07
-  # modelabund['aspl'][26]=3.16e-05
-  # modelabund['aspl'][27]=9.77e-08
-  # modelabund['aspl'][28]=1.66e-06
-  # modelabund['aspl'][29]=1.55e-08
-  # modelabund['aspl'][30]=3.63e-08
-
-  # modelabund['feld'] = numpy.zeros(31)
-  # modelabund['feld'][1]= 1.00e+00
-  # modelabund['feld'][2]= 9.77e-02
-  # modelabund['feld'][3]= 1.26e-11
-  # modelabund['feld'][4]= 2.51e-11
-  # modelabund['feld'][5]= 3.55e-10
-  # modelabund['feld'][6]= 3.98e-04
-  # modelabund['feld'][7]= 1.00e-04
-  # modelabund['feld'][8]= 8.51e-04
-  # modelabund['feld'][9]= 3.63e-08
-  # modelabund['feld'][10]=1.29e-04
-  # modelabund['feld'][11]=2.14e-06
-  # modelabund['feld'][12]=3.80e-05
-  # modelabund['feld'][13]=2.95e-06
-  # modelabund['feld'][14]=3.55e-05
-  # modelabund['feld'][15]=2.82e-07
-  # modelabund['feld'][16]=1.62e-05
-  # modelabund['feld'][17]=3.16e-07
-  # modelabund['feld'][18]=4.47e-06
-  # modelabund['feld'][19]=1.32e-07
-  # modelabund['feld'][20]=2.29e-06
-  # modelabund['feld'][21]=1.48e-09
-  # modelabund['feld'][22]=1.05e-07
-  # modelabund['feld'][23]=1.00e-08
-  # modelabund['feld'][24]=4.68e-07
-  # modelabund['feld'][25]=2.45e-07
-  # modelabund['feld'][26]=3.24e-05
-  # modelabund['feld'][27]=8.32e-08
-  # modelabund['feld'][28]=1.78e-06
-  # modelabund['feld'][29]=1.62e-08
-  # modelabund['feld'][30]=3.98e-08
-
-  # modelabund['aneb'] = numpy.zeros(31)
-  # modelabund['aneb'][1]= 1.00e+00
-  # modelabund['aneb'][2]= 8.01e-02
-  # modelabund['aneb'][3]= 2.19e-09
-  # modelabund['aneb'][4]= 2.87e-11
-  # modelabund['aneb'][5]= 8.82e-10
-  # modelabund['aneb'][6]= 4.45e-04
-  # modelabund['aneb'][7]= 9.12e-05
-  # modelabund['aneb'][8]= 7.39e-04
-  # modelabund['aneb'][9]= 3.10e-08
-  # modelabund['aneb'][10]=1.38e-04
-  # modelabund['aneb'][11]=2.10e-06
-  # modelabund['aneb'][12]=3.95e-05
-  # modelabund['aneb'][13]=3.12e-06
-  # modelabund['aneb'][14]=3.68e-05
-  # modelabund['aneb'][15]=3.82e-07
-  # modelabund['aneb'][16]=1.89e-05
-  # modelabund['aneb'][17]=1.93e-07
-  # modelabund['aneb'][18]=3.82e-06
-  # modelabund['aneb'][19]=1.39e-07
-  # modelabund['aneb'][20]=2.25e-06
-  # modelabund['aneb'][21]=1.24e-09
-  # modelabund['aneb'][22]=8.82e-08
-  # modelabund['aneb'][23]=1.08e-08
-  # modelabund['aneb'][24]=4.93e-07
-  # modelabund['aneb'][25]=3.50e-07
-  # modelabund['aneb'][26]=3.31e-05
-  # modelabund['aneb'][27]=8.27e-08
-  # modelabund['aneb'][28]=1.81e-06
-  # modelabund['aneb'][29]=1.89e-08
-  # modelabund['aneb'][30]=4.63e-08
-
-  # modelabund['grsa'] = numpy.zeros(31)
-  # modelabund['grsa'][1]= 1.00e+00
-  # modelabund['grsa'][2]= 8.51e-02
-  # modelabund['grsa'][3]= 1.26e-11
-  # modelabund['grsa'][4]= 2.51e-11
-  # modelabund['grsa'][5]= 3.55e-10
-  # modelabund['grsa'][6]= 3.31e-04
-  # modelabund['grsa'][7]= 8.32e-05
-  # modelabund['grsa'][8]= 6.76e-04
-  # modelabund['grsa'][9]= 3.63e-08
-  # modelabund['grsa'][10]=1.20e-04
-  # modelabund['grsa'][11]=2.14e-06
-  # modelabund['grsa'][12]=3.80e-05
-  # modelabund['grsa'][13]=2.95e-06
-  # modelabund['grsa'][14]=3.55e-05
-  # modelabund['grsa'][15]=2.82e-07
-  # modelabund['grsa'][16]=2.14e-05
-  # modelabund['grsa'][17]=3.16e-07
-  # modelabund['grsa'][18]=2.51e-06
-  # modelabund['grsa'][19]=1.32e-07
-  # modelabund['grsa'][20]=2.29e-06
-  # modelabund['grsa'][21]=1.48e-09
-  # modelabund['grsa'][22]=1.05e-07
-  # modelabund['grsa'][23]=1.00e-08
-  # modelabund['grsa'][24]=4.68e-07
-  # modelabund['grsa'][25]=2.45e-07
-  # modelabund['grsa'][26]=3.16e-05
-  # modelabund['grsa'][27]=8.32e-08
-  # modelabund['grsa'][28]=1.78e-06
-  # modelabund['grsa'][29]=1.62e-08
-  # modelabund['grsa'][30]=3.98e-08
-
-  # modelabund['wilm'] = numpy.zeros(31)
-  # modelabund['wilm'][1]= 1.00e+00
-  # modelabund['wilm'][2]= 9.77e-02
-  # modelabund['wilm'][3]= 0.00
-  # modelabund['wilm'][4]= 0.00
-  # modelabund['wilm'][5]= 0.00
-  # modelabund['wilm'][6]= 2.40e-04
-  # modelabund['wilm'][7]= 7.59e-05
-  # modelabund['wilm'][8]= 4.90e-04
-  # modelabund['wilm'][9]= 0.00
-  # modelabund['wilm'][10]=8.71e-05
-  # modelabund['wilm'][11]=1.45e-06
-  # modelabund['wilm'][12]=2.51e-05
-  # modelabund['wilm'][13]=2.14e-06
-  # modelabund['wilm'][14]=1.86e-05
-  # modelabund['wilm'][15]=2.63e-07
-  # modelabund['wilm'][16]=1.23e-05
-  # modelabund['wilm'][17]=1.32e-07
-  # modelabund['wilm'][18]=2.57e-06
-  # modelabund['wilm'][19]=0.00
-  # modelabund['wilm'][20]=1.58e-06
-  # modelabund['wilm'][21]=0.00
-  # modelabund['wilm'][22]=6.46e-08
-  # modelabund['wilm'][23]=0.00
-  # modelabund['wilm'][24]=3.24e-07
-  # modelabund['wilm'][25]=2.19e-07
-  # modelabund['wilm'][26]=2.69e-05
-  # modelabund['wilm'][27]=8.32e-08
-  # modelabund['wilm'][28]=1.12e-06
-  # modelabund['wilm'][29]=0.00
-  # modelabund['wilm'][30]=0.00
-
-  # modelabund['lodd'] = numpy.zeros(31)
-  # modelabund['lodd'][1]= 1.00e+00
-  # modelabund['lodd'][2]= 7.92e-02
-  # modelabund['lodd'][3]= 1.90e-09
-  # modelabund['lodd'][4]= 2.57e-11
-  # modelabund['lodd'][5]= 6.03e-10
-  # modelabund['lodd'][6]= 2.45e-04
-  # modelabund['lodd'][7]= 6.76e-05
-  # modelabund['lodd'][8]= 4.90e-04
-  # modelabund['lodd'][9]= 2.88e-08
-  # modelabund['lodd'][10]=7.41e-05
-  # modelabund['lodd'][11]=1.99e-06
-  # modelabund['lodd'][12]=3.55e-05
-  # modelabund['lodd'][13]=2.88e-06
-  # modelabund['lodd'][14]=3.47e-05
-  # modelabund['lodd'][15]=2.88e-07
-  # modelabund['lodd'][16]=1.55e-05
-  # modelabund['lodd'][17]=1.82e-07
-  # modelabund['lodd'][18]=3.55e-06
-  # modelabund['lodd'][19]=1.29e-07
-  # modelabund['lodd'][20]=2.19e-06
-  # modelabund['lodd'][21]=1.17e-09
-  # modelabund['lodd'][22]=8.32e-08
-  # modelabund['lodd'][23]=1.00e-08
-  # modelabund['lodd'][24]=4.47e-07
-  # modelabund['lodd'][25]=3.16e-07
-  # modelabund['lodd'][26]=2.95e-05
-  # modelabund['lodd'][27]=8.13e-08
-  # modelabund['lodd'][28]=1.66e-06
-  # modelabund['lodd'][29]=1.82e-08
-  # modelabund['lodd'][30]=4.27e-08
-
-  # return modelabund[abundset][Z]/modelabund['angr'][Z]
