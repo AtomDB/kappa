@@ -30,13 +30,12 @@ Installation
 
 Requires:
 
-python 3
-pyatomdb >= 0.8.0
-numpy
-astropy
-scipy
-
-pylab for demonstration
+- python 3
+- pyatomdb >= 0.8.0
+- numpy
+- astropy
+- scipy
+- pylab for demonstration
 
 No installation necessary. Make sure the folder is somewhere in your python path (or start python from within this directory). 
 
