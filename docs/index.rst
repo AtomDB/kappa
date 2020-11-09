@@ -5,7 +5,7 @@
 
 Welcome to Kappa's documentation!
 =================================
-.. include:: ../README.TXT
+.. include:: /README.RST
 
 .. toctree::
    :maxdepth: 2

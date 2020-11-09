@@ -50,11 +50,11 @@ Usage
 
 Mostly just make a kappa object, then call it
 
-.. literalinclude:: test_kappa_noxspec.py
+.. literalinclude:: /../examples/test_kappa_noxspec.py
   :language: python3
 
 
-.. figure:: test_kappa_noxspec.svg
+.. figure:: /../test_kappa_noxspec.svg
     :align: center
     :alt: Kappa module example
     :figclass: align-center
@@ -96,22 +96,22 @@ Once you have this, models can be used in pyxspec in the usual way, e.g.
 Model parameters
 ++++++++++++++++
 
-+--------------+-----------------------------------------------------------------------------------+
-| Parameter    | Definition                                                                        |
-+==============+===================================================================================+
-| kT           | Plasma temperature (keV). Used for recombining particle ion fraction              |
-+--------------+-----------------------------------------------------------------------------------+
-| kappa        | The degree of non-Maxwellianness of the electrons                                 |
-+--------------+-----------------------------------------------------------------------------------+
++--------------+-------------------------------------------------------------------------------------------+
+| Parameter    | Definition                                                                                |
++==============+===========================================================================================+
+| kT           | Plasma temperature (keV). Used for recombining particle ion fraction                      |
++--------------+-------------------------------------------------------------------------------------------+
+| kappa        | The degree of non-Maxwellianness of the electrons                                         |
++--------------+-------------------------------------------------------------------------------------------+
 | abund        | recombining elemental abundances. (given by individual element in pyvkappa and pyvvkappa) |
-+--------------+-----------------------------------------------------------------------------------+
++--------------+-------------------------------------------------------------------------------------------+
 
 An example of using the model in xspec:
 
-.. literalinclude:: test_kappa.py
+.. literalinclude:: /../examples/test_kappa.py
 
 
-.. figure:: test_kappa.svg
+.. figure:: /../test_kappa.svg
     :align: center
     :alt: Kappa XSPEC module example
     :figclass: align-center
