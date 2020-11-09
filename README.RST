@@ -109,7 +109,6 @@ Model parameters
 An example of using the model in xspec:
 
 .. literalinclude:: test_kappa.py
-  :language: python3
 
 
 .. figure:: test_kappa.svg
